@@ -1,24 +1,74 @@
-from flask import Flask, render_template, request
+from flask import Flask, request, render_template, redirect, flash, session
 from flask_debugtoolbar import DebugToolbarExtension
-from stories import story
+from surveys import satisfaction_survey as survey
+
+# key names will use to store some things in session;
+# put here as constants so we're guaranteed to be consistent in
+# our spelling of those
+RESPONSES_KEY = "responses"
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret'
+app.config['SECRET_KEY'] = "never-tell!"
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 
 debug = DebugToolbarExtension(app)
 
 @app.route("/")
-def ask_questions():
-    """Generate ands how form to ask words"""
+def show_survey_start():
+    """Select a survey."""
 
-    prompts = story.prompts
+    return render_template("survey_start.html", survey=survey)
 
-    return render_template("questions.html", prompts = prompts)
+@app.route("/begin", methods=["POST"])
+def start_survey():
+    """Clear the session of responses."""
 
-@app.route("/story")
-def show_story():
-    """Show story result"""
+    session[RESPONSES_KEY] = []
 
-    text = story.generate(request.args)
+    return redirect("/questions/0")
 
-    return render_template("story.html", text=text)
+@app.route("/answer", methods=["POST"])
+def handle_question():
+    """Save response and redirect to next question."""
+
+    # get the response choice
+    choice = request.form['answer']
+
+    # add this response to the session
+    responses = session[RESPONSES_KEY]
+    responses.append(choice)
+    session[RESPONSES_KEY] = responses
+
+    if(len(responses) == len(survey.questions)):
+        # They've answered all the questions! Thank them.
+        return redirect("/complete")
+
+    else:
+        return redirect(f"/questions/{len(responses)}")
+
+@app.route("/questions/<int:qid>")
+def show_question(qid):
+    """"Display current question."""
+    responses = session.get(RESPONSES_KEY)
+
+    if (responses is None):
+        # trying to access question page too soon
+        return redirect("/")
+
+    if(len(responses) == len(survey.questions)):
+        # they've answered all the questions! Thank them.
+        return redirect("/complete")
+
+    if (len(responses) != qid):
+        # trying to access questions out of order.
+        flash(f"Invalid question id: {qid}.")
+        return redirect (f"/questions/{len(responses)}")
+
+    question = survey.questions[qid]
+    return render_template(
+        "question.html", question_num=qid, question=question)
+
+@app.route("/complete")
+def complete():
+    """Survey complete. Show completion page."""
+    return render_template("completion.html")
